@@ -109,7 +109,16 @@ const (
 	SpanRedisRequestPayload  = "redis.request_payload"
 	SpanRedisResponsePayload = "redis.request_payload"
 
+	SpanRocketMQRequestMsg = "rocketmq.request_msg"
+	SpanRocketMQErrMsg     = "rocketmq.error_msg"
+
 	NetWorkAnalyzeMetricGroup = "netAnalyzeMetrics"
+
+	// IsSent is used by cpuAnalyzer to label whether an event has been sent.
+	IsSent     = "isSent"
+	ThreadName = "threadName"
+	StartTime  = "startTime"
+	EndTime    = "endTime"
 )
 const (
 	STR_EMPTY = ""

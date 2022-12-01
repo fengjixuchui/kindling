@@ -2,14 +2,16 @@ package cpuanalyzer
 
 import (
 	"fmt"
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/Kindling-project/kindling/collector/pkg/component"
 	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer"
 	"github.com/Kindling-project/kindling/collector/pkg/model"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constnames"
 	"go.uber.org/zap/zapcore"
-	"strconv"
-	"sync"
 )
 
 const (
@@ -23,8 +25,8 @@ type CpuAnalyzer struct {
 	sendEventsRoutineMap sync.Map
 	lock                 sync.Mutex
 	telemetry            *component.TelemetryTools
-
-	nextConsumers []consumer.Consumer
+	tidExpiredQueue      *tidDeleteQueue
+	nextConsumers        []consumer.Consumer
 }
 
 func (ca *CpuAnalyzer) Type() analyzer.Type {
@@ -43,6 +45,8 @@ func NewCpuAnalyzer(cfg interface{}, telemetry *component.TelemetryTools, consum
 		nextConsumers: consumers,
 	}
 	ca.cpuPidEvents = make(map[uint32]map[uint32]*TimeSegments, 100000)
+	ca.tidExpiredQueue = newTidDeleteQueue()
+	go ca.TidDelete(30*time.Second, 10*time.Second)
 	return ca
 }
 
@@ -221,20 +225,25 @@ func (ca *CpuAnalyzer) PutEventToSegments(pid uint32, tid uint32, threadName str
 				(newTimeSegments.BaseTime+uint64(i+1))*nanoToSeconds)
 			newTimeSegments.Segments.UpdateByIndex(i, segment)
 		}
-		val := newTimeSegments.Segments.GetByIndex(0)
-		segment := val.(*Segment)
-		segment.putTimedEvent(event)
+
+		endOffset := int(event.EndTimestamp()/nanoToSeconds - newTimeSegments.BaseTime)
+
+		for i := 0; i <= endOffset && i < maxSegmentSize; i++ {
+			val := newTimeSegments.Segments.GetByIndex(i)
+			segment := val.(*Segment)
+			segment.putTimedEvent(event)
+			segment.IsSend = 0
+		}
+
 		tidCpuEvents[tid] = newTimeSegments
 	}
 }
 
 func (ca *CpuAnalyzer) trimExitedThread(pid uint32, tid uint32) {
-	ca.lock.Lock()
-	defer ca.lock.Unlock()
-	tidEventsMap := ca.cpuPidEvents[pid]
-	if tidEventsMap == nil {
-		return
-	}
-	ca.telemetry.Logger.Debugf("Receive a procexit pid=%d, tid=%d, which will be deleted from map", pid, tid)
-	delete(tidEventsMap, tid)
+	ca.tidExpiredQueue.queueMutex.Lock()
+	defer ca.tidExpiredQueue.queueMutex.Unlock()
+	ca.telemetry.Logger.Debugf("Receive a procexit pid=%d, tid=%d, which will be deleted from map after 10 seconds. ", pid, tid)
+
+	cacheElem := deleteTid{pid: pid, tid: tid, exitTime: time.Now()}
+	ca.tidExpiredQueue.Push(cacheElem)
 }

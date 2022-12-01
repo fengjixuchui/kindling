@@ -9,12 +9,14 @@
 extern "C" {
 #endif
 int runForGo();
-int getKindlingEvent(void **kindlingEvent);
+int getKindlingEvent(void** kindlingEvent);
 void subEventForGo(char* eventName, char* category);
 int startProfile();
 int stopProfile();
+void startProfileDebug(int pid, int tid);
+void stopProfileDebug();
 #ifdef __cplusplus
 }
 #endif
 
-#endif //SYSDIG_CGO_FUNC_H
+#endif  // SYSDIG_CGO_FUNC_H
