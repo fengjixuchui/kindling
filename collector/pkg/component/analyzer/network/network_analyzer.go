@@ -8,14 +8,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/Kindling-project/kindling/collector/pkg/component"
 	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer"
 	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer/network/protocol"
 	"github.com/Kindling-project/kindling/collector/pkg/component/analyzer/network/protocol/factory"
 	"github.com/Kindling-project/kindling/collector/pkg/component/consumer"
-	conntracker2 "github.com/Kindling-project/kindling/collector/pkg/metadata/conntracker"
+	"github.com/Kindling-project/kindling/collector/pkg/metadata/conntracker"
 	"github.com/Kindling-project/kindling/collector/pkg/model/constnames"
-	"go.opentelemetry.io/otel/attribute"
 
 	"go.uber.org/zap/zapcore"
 
@@ -34,7 +35,7 @@ const (
 type NetworkAnalyzer struct {
 	cfg           *Config
 	nextConsumers []consumer.Consumer
-	conntracker   conntracker2.Conntracker
+	conntracker   conntracker.Conntracker
 
 	staticPortMap    map[uint32]string
 	slowThresholdMap map[string]int
@@ -58,7 +59,7 @@ func NewNetworkAnalyzer(cfg interface{}, telemetry *component.TelemetryTools, co
 		telemetry:     telemetry,
 	}
 	if config.EnableConntrack {
-		connConfig := &conntracker2.Config{
+		connConfig := &conntracker.Config{
 			Enabled:                      config.EnableConntrack,
 			ProcRoot:                     config.ProcRoot,
 			ConntrackInitTimeout:         30 * time.Second,
@@ -66,7 +67,7 @@ func NewNetworkAnalyzer(cfg interface{}, telemetry *component.TelemetryTools, co
 			ConntrackMaxStateSize:        config.ConntrackMaxStateSize,
 			EnableConntrackAllNamespaces: true,
 		}
-		na.conntracker, _ = conntracker2.NewConntracker(connConfig)
+		na.conntracker, _ = conntracker.NewConntracker(connConfig)
 	}
 
 	na.parserFactory = factory.NewParserFactory(factory.WithUrlClusteringMethod(na.cfg.UrlClusteringMethod))
@@ -193,8 +194,15 @@ func (na *NetworkAnalyzer) consumerFdNoReusingTrace() {
 			na.requestMonitor.Range(func(k, v interface{}) bool {
 				mps := v.(*messagePairs)
 				var timeoutTs = mps.getTimeoutTs()
-				if timeoutTs != 0 && (time.Now().UnixNano()/1000000000-int64(timeoutTs)/1000000000) >= 15 {
-					na.distributeTraceMetric(mps, nil)
+				if timeoutTs != 0 {
+					var duration = (time.Now().UnixNano()/1000000000 - int64(timeoutTs)/1000000000)
+					if mps.responses != nil && duration >= int64(na.cfg.GetFdReuseTimeout()) {
+						// No FdReuse Request
+						na.distributeTraceMetric(mps, nil)
+					} else if duration >= int64(na.cfg.getNoResponseThreshold()) {
+						// No Response Request
+						na.distributeTraceMetric(mps, nil)
+					}
 				}
 				return true
 			})
@@ -259,7 +267,7 @@ func (na *NetworkAnalyzer) analyseRequest(evt *model.KindlingEvent) error {
 			}
 		}
 
-		if oldPairs.responses != nil || oldPairs.requests.IsTimeout(evt, na.cfg.GetRequestTimeout()) {
+		if oldPairs.responses != nil || oldPairs.requests.IsSportChanged(evt) {
 			na.distributeTraceMetric(oldPairs, mps)
 		} else {
 			oldPairs.mergeRequest(evt)
@@ -293,6 +301,11 @@ func (na *NetworkAnalyzer) distributeTraceMetric(oldPairs *messagePairs, newPair
 	} else if oldPairs.requests != nil {
 		queryEvt = oldPairs.requests.event
 	} else {
+		return nil
+	}
+
+	if oldPairs.checkSend() == false {
+		// FIX send twice for request/response with 15s delay.
 		return nil
 	}
 
@@ -406,7 +419,6 @@ func (na *NetworkAnalyzer) parseProtocol(mps *messagePairs, parser *protocol.Pro
 		// Parse failure
 		return nil
 	}
-	requestMsg.AddByteArrayUtf8Attribute(constlabels.RequestPayload, mps.requests.getData())
 
 	if mps.responses == nil {
 		return na.getRecords(mps, parser.GetProtocol(), requestMsg.GetAttributes())
@@ -417,8 +429,6 @@ func (na *NetworkAnalyzer) parseProtocol(mps *messagePairs, parser *protocol.Pro
 		// Parse failure
 		return nil
 	}
-	responseMsg.AddByteArrayUtf8Attribute(constlabels.ResponsePayload, mps.responses.getData())
-
 	return na.getRecords(mps, parser.GetProtocol(), responseMsg.GetAttributes())
 }
 
@@ -495,6 +505,8 @@ func (na *NetworkAnalyzer) getConnectFailRecords(mps *messagePairs) []*model.Dat
 	ret.UpdateAddIntMetric(constvalues.ConnectTime, int64(mps.connects.getDuration()))
 	ret.UpdateAddIntMetric(constvalues.RequestTotalTime, int64(mps.connects.getDuration()))
 	ret.Labels.UpdateAddIntValue(constlabels.Pid, int64(evt.GetPid()))
+	ret.Labels.UpdateAddIntValue(constlabels.RequestTid, 0)
+	ret.Labels.UpdateAddIntValue(constlabels.ResponseTid, 0)
 	ret.Labels.UpdateAddStringValue(constlabels.Comm, evt.GetComm())
 	ret.Labels.UpdateAddStringValue(constlabels.SrcIp, evt.GetSip())
 	ret.Labels.UpdateAddStringValue(constlabels.DstIp, evt.GetDip())
@@ -522,6 +534,7 @@ func (na *NetworkAnalyzer) getRecords(mps *messagePairs, protocol string, attrib
 	ret := na.dataGroupPool.Get()
 	labels := ret.Labels
 	labels.UpdateAddIntValue(constlabels.Pid, int64(evt.GetPid()))
+	addTid(labels, evt, mps.responses)
 	labels.UpdateAddStringValue(constlabels.Comm, evt.GetComm())
 	labels.UpdateAddStringValue(constlabels.SrcIp, evt.GetSip())
 	labels.UpdateAddStringValue(constlabels.DstIp, evt.GetDip())
@@ -537,13 +550,25 @@ func (na *NetworkAnalyzer) getRecords(mps *messagePairs, protocol string, attrib
 	labels.UpdateAddStringValue(constlabels.Protocol, protocol)
 
 	labels.Merge(attributes)
+
+	if mps.responses != nil {
+		endTimestamp := mps.responses.getLastTimestamp()
+		labels.UpdateAddIntValue(constlabels.EndTimestamp, int64(endTimestamp))
+	}
+
+	if mps.responses == nil {
+		addProtocolPayload(protocol, labels, mps.requests.getData(), nil)
+	} else {
+		addProtocolPayload(protocol, labels, mps.requests.getData(), mps.responses.getData())
+	}
+
 	// If no protocol error found, we check other errors
 	if !labels.GetBoolValue(constlabels.IsError) && mps.responses == nil {
 		labels.AddBoolValue(constlabels.IsError, true)
 		labels.AddIntValue(constlabels.ErrorType, int64(constlabels.NoResponse))
 	}
 
-	if nil != mps.natTuple && mps.responses != nil {
+	if nil != mps.natTuple {
 		labels.UpdateAddStringValue(constlabels.DnatIp, mps.natTuple.ReplSrcIP.String())
 		labels.UpdateAddIntValue(constlabels.DnatPort, int64(mps.natTuple.ReplSrcPort))
 	}
@@ -571,6 +596,7 @@ func (na *NetworkAnalyzer) getRecordWithSinglePair(mps *messagePairs, mp *messag
 	ret := na.dataGroupPool.Get()
 	labels := ret.Labels
 	labels.UpdateAddIntValue(constlabels.Pid, int64(evt.GetPid()))
+	addTid(labels, evt, mps.responses)
 	labels.UpdateAddStringValue(constlabels.Comm, evt.GetComm())
 	labels.UpdateAddStringValue(constlabels.SrcIp, evt.GetSip())
 	labels.UpdateAddStringValue(constlabels.DstIp, evt.GetDip())
@@ -586,13 +612,23 @@ func (na *NetworkAnalyzer) getRecordWithSinglePair(mps *messagePairs, mp *messag
 	labels.UpdateAddStringValue(constlabels.Protocol, protocol)
 
 	labels.Merge(attributes)
+	if mps.responses != nil {
+		endTimestamp := mp.response.Timestamp
+		labels.UpdateAddIntValue(constlabels.EndTimestamp, int64(endTimestamp))
+	}
+	if mp.response == nil {
+		addProtocolPayload(protocol, labels, evt.GetData(), nil)
+	} else {
+		addProtocolPayload(protocol, labels, evt.GetData(), mp.response.GetData())
+	}
+
 	// If no protocol error found, we check other errors
 	if !labels.GetBoolValue(constlabels.IsError) && mps.responses == nil {
 		labels.AddBoolValue(constlabels.IsError, true)
 		labels.AddIntValue(constlabels.ErrorType, int64(constlabels.NoResponse))
 	}
 
-	if nil != mps.natTuple && mps.responses != nil {
+	if nil != mps.natTuple {
 		labels.UpdateAddStringValue(constlabels.DnatIp, mps.natTuple.ReplSrcIP.String())
 		labels.UpdateAddIntValue(constlabels.DnatPort, int64(mps.natTuple.ReplSrcPort))
 	}
@@ -607,6 +643,24 @@ func (na *NetworkAnalyzer) getRecordWithSinglePair(mps *messagePairs, mp *messag
 
 	ret.Timestamp = evt.GetStartTime()
 	return ret
+}
+
+func addTid(labels *model.AttributeMap, evt *model.KindlingEvent, responses *events) {
+	labels.UpdateAddIntValue(constlabels.RequestTid, int64(evt.GetTid()))
+	if responses != nil {
+		labels.UpdateAddIntValue(constlabels.ResponseTid, int64(responses.event.GetTid()))
+	} else {
+		labels.UpdateAddIntValue(constlabels.ResponseTid, 0)
+	}
+}
+
+func addProtocolPayload(protocolName string, labels *model.AttributeMap, request []byte, response []byte) {
+	labels.UpdateAddStringValue(constlabels.RequestPayload, protocol.GetPayloadString(request, protocolName))
+	if response != nil {
+		labels.UpdateAddStringValue(constlabels.ResponsePayload, protocol.GetPayloadString(response, protocolName))
+	} else {
+		labels.UpdateAddStringValue(constlabels.ResponsePayload, "")
+	}
 }
 
 func (na *NetworkAnalyzer) isSlow(duration uint64, protocol string) bool {

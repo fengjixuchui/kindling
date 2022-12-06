@@ -46,6 +46,8 @@ trace:
       Labels:
         comm: "rdk:broker1"
         pid: 942
+        request_tid: 954
+        response_tid: 954
         src_ip: "127.0.0.1"
         src_port: 38966
         dst_ip: "127.0.0.1"
@@ -63,3 +65,6 @@ trace:
         kafka_error_code: 0
         is_error: false
         error_type: 0
+        end_timestamp: 100030000
+        request_payload: "...........@..rdkafka......u0......container-monitor...........O...........C...."
+        response_payload: "...A...@......container-monitor.................u...................."

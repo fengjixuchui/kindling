@@ -40,6 +40,8 @@ trace:
       Labels:
         comm: "rdk:broker1"
         pid: 925
+        request_tid: 937
+        response_tid: 937
         src_ip: "127.0.0.1"
         src_port: 38970
         dst_ip: "127.0.0.1"
@@ -57,3 +59,6 @@ trace:
         kafka_error_code: 0
         is_error: false
         error_type: 0
+        end_timestamp: 100020000
+        request_payload: "...\"..........consumer-merge-2............. .....(...=^......npm_request_trace.................tS...........................A...............npm_detail_topology_request...................:............."
+        response_payload: "................(....."

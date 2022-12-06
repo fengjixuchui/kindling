@@ -38,6 +38,8 @@ trace:
       Labels:
         comm: "java"
         pid: 942
+        request_tid: 954
+        response_tid: 954
         src_ip: "127.0.0.1"
         src_port: 41458
         dst_ip: "127.0.0.1"
@@ -52,5 +54,6 @@ trace:
         error_type: 0
         content_key: "io.kindling.dubbo.api.service.OrderService#order"
         dubbo_error_code: 20
+        end_timestamp: 101000000
         request_payload: ".2.6.20*io.kindling.dubbo.api.service.OrderService.0.0.0.order0\"Ljava/l"
         response_payload: "..Thisisaresult."

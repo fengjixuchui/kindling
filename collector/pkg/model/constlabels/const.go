@@ -10,6 +10,8 @@ const (
 const (
 	Comm            = "comm"
 	Pid             = "pid"
+	RequestTid      = "request_tid"
+	ResponseTid     = "response_tid"
 	Tid             = "tid"
 	Protocol        = "protocol"
 	IsError         = "is_error"
@@ -50,6 +52,9 @@ const (
 	Container       = "container"
 	Ip              = "ip"
 	Port            = "port"
+
+	// EndTimestamp is the end timestamp of a trace
+	EndTimestamp = "end_timestamp"
 
 	Errno           = "errno"
 	Success         = "success"
@@ -111,6 +116,9 @@ const (
 
 	SpanRocketMQRequestMsg = "rocketmq.request_msg"
 	SpanRocketMQErrMsg     = "rocketmq.error_msg"
+
+	SpanRequestPayload  = "request_payload"
+	SpanResponsePayload = "response_payload"
 
 	NetWorkAnalyzeMetricGroup = "netAnalyzeMetrics"
 

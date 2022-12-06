@@ -32,6 +32,8 @@ trace:
       Labels:
         comm: "redis-server"
         pid: 817
+        request_tid: 817
+        response_tid: 817
         src_ip: "127.0.0.1"
         src_port: 39130
         dst_ip: "127.0.0.1"
@@ -46,5 +48,6 @@ trace:
         redis_command: "get"
         is_error: false
         error_type: 0
+        end_timestamp: 100100000
         request_payload: "*2\r\n$3\r\nget\r\n$3\r\nkey\r\n"
         response_payload: "$3\r\nabc\r\n"

@@ -70,6 +70,8 @@ trace:
       Labels:
         comm: "systemd-resolve"
         pid: 577
+        request_tid: 577
+        response_tid: 577
         src_ip: "127.0.0.1"
         src_port: 60129
         dst_ip: "127.0.0.53"
@@ -86,6 +88,9 @@ trace:
         dns_ip: "121.227.7.33"
         is_error: false
         error_type: 0
+        end_timestamp: 101000000
+        request_payload: ".............ss0.baidu.com.......)........"
+        response_payload: ".............ss0.baidu.com..................sslbaidu.jomodns...+.......2..y..!.."
     -
       Timestamp: 100396000
       Values:
@@ -99,6 +104,8 @@ trace:
       Labels:
         comm: "systemd-resolve"
         pid: 577
+        request_tid: 577
+        response_tid: 577
         src_ip: "127.0.0.1"
         src_port: 60129
         dst_ip: "127.0.0.53"
@@ -114,3 +121,6 @@ trace:
         dns_rcode: 0
         is_error: false
         error_type: 0
+        end_timestamp: 101500000
+        request_payload: "9............ss0.baidu.com.......)........"
+        response_payload: "9............ss0.baidu.com..................sslbaidu.jomodns....)........"

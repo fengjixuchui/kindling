@@ -44,6 +44,8 @@ trace:
       Labels:
         comm: "mysqld"
         pid: 903
+        request_tid: 2744
+        response_tid: 2744
         src_ip: "127.0.0.1"
         src_port: 49368
         dst_ip: "127.0.0.1"
@@ -56,5 +58,8 @@ trace:
         protocol: "mysql"
         content_key: "select dummy *"
         sql: "SELECT * FROM dummy"
+        request_payload: ".....SELECT * FROM dummy"
+        response_payload: ".....9....def.container-monitor.dummy.dummy.name.name.-...........;....def.conta"
         is_error: false
         error_type: 0
+        end_timestamp: 100020000
